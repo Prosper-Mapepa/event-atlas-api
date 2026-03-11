@@ -1,0 +1,173 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Add to package.json: "prisma": { "seed": "tsx prisma/seed.ts" }
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auth & Users
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String   // hashed with bcrypt
+  name      String?
+  role      String   @default("explorer") // explorer | business | admin
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  refreshTokens RefreshToken[]
+  tickets       Ticket[]
+  events        Event[]
+  savedEvents   SavedEvent[]
+  rsvps         RSVP[]
+  following     Follow[]   @relation("Follower")  // users this user follows
+  followers     Follow[]   @relation("Following") // users who follow this user
+  conversationsAsUser1 Conversation[] @relation("ConversationUser1")
+  conversationsAsUser2 Conversation[] @relation("ConversationUser2")
+  messagesSent Message[]
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model PasswordReset {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Events
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Event {
+  id          String   @id @default(cuid())
+  name        String
+  category    String
+  description String?
+  location    String
+  lat         Float
+  lng         Float
+  startAt     DateTime
+  endAt       DateTime?
+  capacity    Int?
+  attendees   Int      @default(0)
+  priceFrom   Float?   // cents
+  priceTo     Float?   // cents
+  highlight   String?
+  imageUrl    String?  // primary/first image
+  imageUrls   Json?    // [url1, url2, ...] for slider
+  tiers       Json?    // [{ name, description, price }]
+  status      String   @default("pending_approval") // draft | pending_approval | approved | rejected
+  hostId      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  host        User?       @relation(fields: [hostId], references: [id], onDelete: SetNull)
+  tickets     Ticket[]
+  savedBy     SavedEvent[]
+  rsvps       RSVP[]
+}
+
+model SavedEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  eventId   String
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventId])
+}
+
+model RSVP {
+  id        String   @id @default(cuid())
+  userId    String
+  eventId   String
+  status    String   @default("going") // going | interested
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventId])
+}
+
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String   // user who follows
+  followingId String   // user being followed (organizer)
+  createdAt   DateTime @default(now())
+
+  follower  User @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+}
+
+model Ticket {
+  id        String   @id @default(cuid())
+  eventId   String
+  userId    String?
+  tier      String   // e.g. "General Admission", "VIP Terrace"
+  price     Float    // cents
+  quantity  Int      @default(1)
+  status    String   @default("active") // active, cancelled, refunded
+  createdAt DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Messaging (explorer ↔ business, business ↔ admin)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Conversation {
+  id              String    @id @default(cuid())
+  user1Id         String    // smaller id for canonical ordering
+  user2Id         String
+  user1LastReadAt DateTime?
+  user2LastReadAt DateTime?
+  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime  @default(now())
+
+  user1    User      @relation("ConversationUser1", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2    User      @relation("ConversationUser2", fields: [user2Id], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@unique([user1Id, user2Id])
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  senderId       String
+  content        String   @db.Text
+  createdAt       DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+}
